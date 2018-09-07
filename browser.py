@@ -34,7 +34,7 @@ def open_browser(url):
 	except Exception as e:
 		print(e)
 		driver.close()
-def get_devices():
+"""def get_devices():
 	""" will also get devices ready
 	:return: a list of avaiable devices names, e.g., emulator-5556
 	"""
@@ -104,7 +104,7 @@ def destory_devices():
 	# for device in get_devices():
 	# 	os.system("adb -s " + device + " emu kill")
 	# do force kill
-	os.system("kill -9  $(ps aux | grep 'emulator' | awk '{print $2}')")
+	os.system("kill -9  $(ps aux | grep 'emulator' | awk '{print $2}')")"""
 
 
 if __name__ == "__main__":
