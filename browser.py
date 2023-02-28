@@ -18,48 +18,50 @@ from selenium.webdriver.firefox.options import Options
 
 
 def open_browser(url):
-	'''Will open the browser'''
-	driver = webdriver.Firefox()
-	driver.maximize_window()
-	try:
-		driver.get(url)
-		'''driver.execute_script("var s=window.document.createElement('script');\
-								s.setAttribute(\"type\", \"text/javascript\");\
-								s.setAttribute(\"src\", \"https://raw.githubusercontent.com/marmelab/gremlins.js/master/gremlins.min.js\");\
-								window.document.getElementsByTagName(\"head\")[0].appendChild(s);")'''
-		driver.execute_script(open("./gremlins.js").read())
-		driver.execute_script("var horde = gremlins.createHorde();\
-							   horde.unleash();")
-		
-	except Exception as e:
-		print(e)
-		driver.close()
-"""def get_devices():
-	""" will also get devices ready
-	:return: a list of avaiable devices names, e.g., emulator-5556
-	"""
-	ret = []
-	p = sub.Popen('adb devices', stdout=sub.PIPE, stderr=sub.PIPE, shell=True)
-	output, errors = p.communicate()
-	#print output
-	segs = output.split("\n")
-	for seg in segs:
-		device = seg.split("\t")[0].strip()
-		# if seg.startswith("emulator-"):
-		if not seg.startswith("List") and seg != "\r" and seg != "":
-			p = sub.Popen('adb -s ' + device + ' shell getprop init.svc.bootanim', stdout=sub.PIPE, stderr=sub.PIPE, shell=True)
-			output, errors = p.communicate()
-			tmp_str = output.strip()
-			if output.strip() != "stopped":
-				time.sleep(10)
-				#print "waiting for the emulator:", device
-				return get_devices()
-			else:
-				ret.append(device)
+    '''Will open the browser'''
+    driver = webdriver.Firefox()
+    driver.maximize_window()
+    try:
+        driver.get(url)
+        '''driver.execute_script("var s=window.document.createElement('script');\
+                                s.setAttribute(\"type\", \"text/javascript\");\
+                                s.setAttribute(\"src\", \"https://raw.githubusercontent.com/marmelab/gremlins.js/master/gremlins.min.js\");\
+                                window.document.getElementsByTagName(\"head\")[0].appendChild(s);")'''
+        with open("./gremlins.js") as f:
+            driver.execute_script(f.read())
+        driver.execute_script("var horde = gremlins.createHorde();\
+                               horde.unleash();")
+        
+    except Exception as e:
+        print(e)
+        driver.close()
 
-	assert len(ret) > 0
-
-	return ret
+def get_devices():
+    """ will also get devices ready
+    :return: a list of avaiable devices names, e.g., emulator-5556
+    """
+    ret = []
+    p = sub.run('adb devices', stdout=sub.PIPE, stderr=sub.PIPE, shell=True)
+    output = p.stdout.decode()
+    errors = p.stderr.decode()
+    if errors:
+        print(errors)
+    else:
+        segs = output.split("\n")
+        for seg in segs:
+            device = seg.split("\t")[0].strip()
+            if device and not seg.startswith("List"):
+                p = sub.run('adb -s ' + device + ' shell getprop init.svc.bootanim', stdout=sub.PIPE, stderr=sub.PIPE, shell=True)
+                output = p.stdout.decode().strip()
+                errors = p.stderr.decode().strip()
+                if errors:
+                    print(errors)
+                elif output != "stopped":
+                    time.sleep(10)
+                    return get_devices()
+                else:
+                    ret.append(device)
+    return ret
 
 
 def boot_devices():
