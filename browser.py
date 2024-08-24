@@ -1,21 +1,31 @@
+import random
+from deap import base, creator, tools, algorithms
+from deap.benchmarks.tools import hypervolume
+import numpy as np
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.keys import Keys
+import argparse
+from datetime import datetime
 import os
 import time
 
-import subprocess as sub
+# Argument parser for NSGA-II
+parser = argparse.ArgumentParser()
+parser.add_argument("--url", help="URL to use")
+parser.add_argument("--ngen", default=10, help="Number of generations")
+parser.add_argument("--npop", default=2, help="Number of populations")
+parser.add_argument("--nchromo", default=2, help="Number of chromosomes")
+parser.add_argument("--headless", default=1, help="Headless mode; 0 for no, 1 for yes")
+args = parser.parse_args()
 
-from selenium import webdriver
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import Select
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import NoSuchElementException,TimeoutException
-from selenium.webdriver.firefox.options import Options
+num_chromosomes = int(args.nchromo)
 
-#import settings
-#from util import motifcore_installer
-#from util import pack_and_deploy
+# DEAP setup
+creator.create("FitnessMulti", base.Fitness, weights=(-1.0, 1.0))
+creator.create("TestCase", list, fitness=creator.FitnessMulti)
 
+toolbox = base.Toolbox()
 
 def open_browser(url):
     '''Will open the browser'''
@@ -23,91 +33,102 @@ def open_browser(url):
     driver.maximize_window()
     try:
         driver.get(url)
-        '''driver.execute_script("var s=window.document.createElement('script');\
-                                s.setAttribute(\"type\", \"text/javascript\");\
-                                s.setAttribute(\"src\", \"https://raw.githubusercontent.com/marmelab/gremlins.js/master/gremlins.min.js\");\
-                                window.document.getElementsByTagName(\"head\")[0].appendChild(s);")'''
         with open("./gremlins.js") as f:
             driver.execute_script(f.read())
-        driver.execute_script("var horde = gremlins.createHorde();\
-                               horde.unleash();")
-        
+        driver.execute_script("var horde = gremlins.createHorde(); horde.unleash();")
+        time.sleep(5)  # Let the gremlins do their thing
     except Exception as e:
         print(e)
-        driver.close()
+    return driver
 
-def get_devices():
-    """ will also get devices ready
-    :return: a list of avaiable devices names, e.g., emulator-5556
-    """
-    ret = []
-    p = sub.run('adb devices', stdout=sub.PIPE, stderr=sub.PIPE, shell=True)
-    output = p.stdout.decode()
-    errors = p.stderr.decode()
-    if errors:
-        print(errors)
-    else:
-        segs = output.split("\n")
-        for seg in segs:
-            device = seg.split("\t")[0].strip()
-            if device and not seg.startswith("List"):
-                p = sub.run('adb -s ' + device + ' shell getprop init.svc.bootanim', stdout=sub.PIPE, stderr=sub.PIPE, shell=True)
-                output = p.stdout.decode().strip()
-                errors = p.stderr.decode().strip()
-                if errors:
-                    print(errors)
-                elif output != "stopped":
-                    time.sleep(10)
-                    return get_devices()
-                else:
-                    ret.append(device)
-    return ret
+def evaluate(individual):
+    errors = []
+    driver = open_browser(args.url)
+    if not driver:
+        return len(individual), len(errors)
+    
+    try:
+        # Example interaction with the page using individual test cases
+        for action in individual:
+            # Custom interaction logic here (e.g., sending keys, clicking, etc.)
+            pass
 
+        # Collect errors (this is a simplified example)
+        for entry in driver.get_log('browser'):
+            errors.append(entry)
 
-def boot_devices():
-	"""
-	prepare the env of the device
-	:return:
-	"""
-	for i in range(0, settings.DEVICE_NUM):
-		device_name = settings.AVD_SERIES + str(i)
-		#print "Booting Device:", device_name
-		time.sleep(0.3)
-		if settings.HEADLESS:
-			sub.Popen('emulator -avd ' + device_name + " -wipe-data -no-audio -no-window",
-					  stdout=sub.PIPE, stderr=sub.PIPE, shell=True)
-		else:
-			sub.Popen('emulator -avd ' + device_name + " -wipe-data -no-audio",
-					  stdout=sub.PIPE, stderr=sub.PIPE, shell=True)
+    except Exception as e:
+        print(f"Error during evaluation: {e}")
+    finally:
+        driver.quit()
 
-	#print "Waiting", settings.AVD_BOOT_DELAY, "seconds"
-	time.sleep(settings.AVD_BOOT_DELAY)
+    # Return objectives: Length of test case and number of errors
+    return len(individual), len(errors)
 
+toolbox.register("attr_generator", lambda: random.choice(['action1', 'action2', 'action3']))
+toolbox.register("individual", tools.initRepeat, creator.TestCase, toolbox.attr_generator, n=num_chromosomes)
+toolbox.register("population", tools.initRepeat, list, toolbox.individual)
 
-def clean_sdcard():
-	for device in get_devices():
-		os.system("adb -s " + device + " shell mount -o rw,remount rootfs /")
-		os.system("adb -s " + device + " shell chmod 777 /mnt/sdcard")
+toolbox.register("evaluate", evaluate)
+toolbox.register("mate", tools.cxTwoPoint)
+toolbox.register("mutate", tools.mutShuffleIndexes, indpb=0.5)
+toolbox.register("select", tools.selNSGA2)
 
-		os.system("adb -s " + device + " shell rm -rf /mnt/sdcard/*")
+def main(seed=None):
+    random.seed(seed)
+    NGEN = int(args.ngen)
+    MU = int(args.npop)
+    CXPB = 0.9
 
+    stats = tools.Statistics(lambda ind: ind.fitness.values)
+    stats.register("avg", np.mean, axis=0)
+    stats.register("min", np.min, axis=0)
+    stats.register("max", np.max, axis=0)
 
-def prepare_motifcore():
-	for device in get_devices():
-		motifcore_installer.install(settings.WORKING_DIR + "lib/motifcore.jar", settings.WORKING_DIR + "resources/motifcore", device)
+    logbook = tools.Logbook()
+    logbook.header = "gen", "evals", "min", "avg", "max"
 
+    pop = toolbox.population(n=MU)
+    invalid_ind = [ind for ind in pop if not ind.fitness.valid]
+    fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
+    for ind, fit in zip(invalid_ind, fitnesses):
+        ind.fitness.values = fit
 
-def pack_and_deploy_aut():
-	# instrument the app under test
-	pack_and_deploy.main(get_devices())
+    pop = toolbox.select(pop, len(pop))
+    record = stats.compile(pop)
+    logbook.record(gen=0, evals=len(invalid_ind), **record)
+    print(logbook.stream)
 
+    for gen in range(1, NGEN):
+        offspring = tools.selTournamentDCD(pop, len(pop))
+        offspring = [toolbox.clone(ind) for ind in offspring]
 
-def destory_devices():
-	# for device in get_devices():
-	# 	os.system("adb -s " + device + " emu kill")
-	# do force kill
-	os.system("kill -9  $(ps aux | grep 'emulator' | awk '{print $2}')")"""
+        for ind1, ind2 in zip(offspring[::2], offspring[1::2]):
+            if random.random() <= CXPB:
+                toolbox.mate(ind1, ind2)
+                del ind1.fitness.values, ind2.fitness.values
 
+            toolbox.mutate(ind1)
+            toolbox.mutate(ind2)
+
+        invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
+        fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
+        for ind, fit in zip(invalid_ind, fitnesses):
+            ind.fitness.values = fit
+
+        pop = toolbox.select(pop + offspring, MU)
+        record = stats.compile(pop)
+        logbook.record(gen=gen, evals=len(invalid_ind), **record)
+        print(logbook.stream)
+
+    print("Final population hypervolume is %f" % hypervolume(pop, [11.0, 11.0]))
+
+    return pop, logbook
 
 if __name__ == "__main__":
-	open_browser('http://www.google.com')
+    pop, stats = main()
+    with open("report_{:%B_%d_%Y}.txt".format(datetime.now()), "w") as f:
+        for ind in pop:
+            f.write(str(ind))
+            f.write("\n")
+            evaluate(ind)  # Re-evaluate for logging
